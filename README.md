@@ -23,9 +23,33 @@ This version includes the following modifications and enhancements:
     *   `benchmark_delaunay`: Evaluates Delaunay triangulation performance.
     *   `benchmark_hull`: Benchmarks convex hull generation.
     *   `benchmark_voronoi`: Measures Voronoi diagram construction speed.
-3.  **Removal of X11 Dependencies**: All X11-dependent code and build requirements have been removed, making the library easier to compile and integrate into modern, headless, or cross-platform environments without requiring legacy X Windows libraries.
+3.  **Removal of X11 Dependencies**: All X11-dependent code and build requirements have been removed, making the library easier to compile and integrate into modern, headless, or cross-platform environments.
+4.  **Modern C++ Wrapper**: Added a high-level C++11 interface (`TriangleMesh`) providing:
+    *   **RAII Memory Management**: Automatic cleanup using `trifree`.
+    *   **High-Level Primitives**: Easy methods to add polygons, circles, and bounding boxes.
+    *   **Centroidal Voronoi Relaxation (Lloyd's Algorithm)**: Smooth existing meshes into high-quality isotropic triangulations.
+    *   **CVT Generation**: A "one-shot" generator to fill any domain with a perfectly distributed set of organic-looking cells.
 
 ---
+
+## C++ Usage Example
+
+```cpp
+#include "src/Triangle.hpp"
+
+triangle::TriangleMesh mesh;
+
+// Define a domain
+mesh.addBoundingBox(0, 0, 100, 100);
+mesh.addCircle(50, 50, 20, 30); // Add a circular boundary
+mesh.addHole(50, 50);          // Make the circle a hole
+
+// Generate 500 points with Centroidal Voronoi distribution
+mesh.generateCVT(500, 20); 
+
+// Access results
+std::cout << "Generated " << mesh.numTriangles() << " quality triangles." << std::endl;
+```
 
 ## Original Features
 

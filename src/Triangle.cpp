@@ -367,6 +367,58 @@ void TriangleMesh::relaxVoronoi(int iterations) {
     }
 }
 
+void TriangleMesh::generateCVT(int numPoints, int iterations) {
+    if (m_points.empty() && m_segments.empty()) {
+        // Default to unit square if no geometry defined
+        addBoundingBox(0, 0, 1, 1);
+    }
+
+    // 1. Calculate bounding box of current geometry
+    double minX = 1e30, minY = 1e30, maxX = -1e30, maxY = -1e30;
+    for (const auto& p : m_points) {
+        minX = std::min(minX, p.x); minY = std::min(minY, p.y);
+        maxX = std::max(maxX, p.x); maxY = std::max(maxY, p.y);
+    }
+
+    // 2. Generate random internal points
+    std::mt19937 rng(42); // Fixed seed for reproducibility
+    std::uniform_real_distribution<double> dist_x(minX, maxX);
+    std::uniform_real_distribution<double> dist_y(minY, maxY);
+
+    for (int i = 0; i < numPoints; ++i) {
+        addPoint(dist_x(rng), dist_y(rng), 0);
+    }
+
+    // 3. Iterative Optimization
+    // For CVT, we must re-triangulate in each step because the topology (neighbors) 
+    // changes as points move significantly from their random starting positions.
+    Options opts;
+    opts.quiet = true;
+    opts.quality = false; // Just basic triangulation for points
+
+    for (int i = 0; i < iterations; ++i) {
+        triangulate(opts);
+        relaxVoronoi(1);
+        
+        // Feed the relaxed points back into the input for the next triangulation
+        std::vector<Point> new_points;
+        // Keep original points that have markers (boundaries)
+        for (const auto& p : m_points) {
+            if (p.marker != 0) new_points.push_back(p);
+        }
+        // Add all points from the output (which includes the relaxed internal points)
+        for (size_t j = 0; j < numPoints(); ++j) {
+            Point p = getPoint(j);
+            if (p.marker == 0) new_points.push_back(p);
+        }
+        m_points = new_points;
+    }
+    
+    // Final triangulation with quality constraints if desired
+    opts.quality = true;
+    triangulate(opts);
+}
+
 void TriangleMesh::clear() {
     m_points.clear();
     m_segments.clear();
