@@ -2,97 +2,96 @@
 
 #include <vector>
 #include <string>
-#include <memory>
-#include <functional>
-
-// Forward declaration of the C structure
-struct triangulateio;
 
 namespace triangle {
 
 /**
- * @brief Configuration options for the Triangle mesh generator.
+ * @brief Clean, modern data structures for mesh data.
  */
-struct Options {
-    bool quality = true;          // -q: quality mesh generation
-    double minAngle = 20.0;       // -q<angle>: minimum angle constraint
-    double maxArea = -1.0;        // -a<area>: maximum area constraint
-    bool voronoi = false;         // -v: generate Voronoi diagram
-    bool delaunay = true;         // default Delaunay
-    bool conforming = false;      // -D: conforming Delaunay
-    bool quiet = true;            // -Q: quiet mode
-    bool zeroBased = true;        // -z: 0-based indexing (recommended for C++)
-    bool computeNeighbors = false;// -n: output triangle neighbors
-    bool computeEdges = false;    // -e: output edges
-    std::string extraSwitches = ""; // Any other custom switches
+struct Point2D {
+    double x, y;
+    int marker;
+    Point2D(double _x = 0, double _y = 0, int _m = 0) : x(_x), y(_y), marker(_m) {}
+};
+
+struct Triangle {
+    int p[3];
+    Triangle(int p1 = 0, int p2 = 0, int p3 = 0) { p[0] = p1; p[1] = p2; p[2] = p3; }
+};
+
+struct Edge {
+    int p[2];
+    int marker;
+    Edge(int p1 = 0, int p2 = 0, int _m = 0) : marker(_m) { p[0] = p1; p[1] = p2; }
 };
 
 /**
- * @brief A high-level C++ wrapper for the Triangle mesh generator.
+ * @brief Configuration options using modern types.
+ */
+struct Options {
+    bool quality = true;
+    double minAngle = 20.0;
+    double maxArea = -1.0;
+    bool voronoi = false;
+    bool conforming = false;
+    bool quiet = true;
+    std::string extraSwitches = "";
+};
+
+/**
+ * @brief The TriangleMesh class. 
+ * Completely hides the legacy C 'triangulateio' structures.
  */
 class TriangleMesh {
 public:
-    struct Point {
-        double x, y;
-        int marker;
-        Point(double _x, double _y, int _m = 0) : x(_x), y(_y), marker(_m) {}
-    };
-
-    struct Segment {
-        int p1, p2;
-        int marker;
-        Segment(int _p1, int _p2, int _m = 0) : p1(_p1), p2(_p2), marker(_m) {}
-    };
-
     TriangleMesh();
     ~TriangleMesh();
 
-    // --- Input Methods ---
+    // --- Input API (Modern Types) ---
     void addPoint(double x, double y, int marker = 0);
+    void addPoint(const Point2D& p) { addPoint(p.x, p.y, p.marker); }
     void addSegment(int p1, int p2, int marker = 0);
     void addHole(double x, double y);
-    void addRegion(double x, double y, double attribute, double maxArea = -1.0);
-
-    // --- High-Level Primitive Helpers ---
-    void addPolygon(const std::vector<Point>& points, bool closed = true);
+    
+    // --- High-Level Helpers ---
+    void addPolygon(const std::vector<Point2D>& points, bool closed = true);
     void addBoundingBox(double x1, double y1, double x2, double y2, int marker = 1);
-    void addCircle(double cx, double cy, double radius, int numSegments, int marker = 0);
-    void setTargetEdgeLength(double length);
+    void addCircle(double cx, double cy, double radius, int segments, int marker = 0);
 
     // --- Execution ---
     bool triangulate(const Options& opts = Options());
 
-    // --- Output Accessors ---
-    size_t numPoints() const;
-    Point getPoint(size_t index) const;
-    size_t numTriangles() const;
-    void getTriangle(size_t index, int& p1, int& p2, int& p3) const;
-    size_t numEdges() const;
-    void getEdge(size_t index, int& p1, int& p2) const;
-    size_t numVoronoiEdges() const;
-    void getVoronoiEdge(size_t index, int& p1, int& p2) const;
-    
-    // --- Advanced Features ---
+    // --- Optimization ---
     void smooth(int iterations = 1);
     void relaxVoronoi(int iterations = 1);
     void relaxODT(int iterations = 1);
     void generateCVT(int numPoints, int iterations = 20);
+
+    // --- Bulk Output API (The "Clean" Way) ---
+    const std::vector<Point2D>&  points()    const { return m_outPoints; }
+    const std::vector<Triangle>& triangles() const { return m_outTriangles; }
+    const std::vector<Edge>&     edges()     const { return m_outEdges; }
+    const std::vector<Edge>&     voronoi()   const { return m_outVoronoi; }
+
     void clear();
 
 private:
-    std::vector<Point> m_points;
-    std::vector<Segment> m_segments;
-    std::vector<std::pair<double, double>> m_holes;
-    std::vector<std::vector<double>> m_regions;
-    double m_targetArea = -1.0;
+    // Implementation details hidden via opaque pointers or private members
+    struct Impl;
+    Impl* pImpl;
 
-    struct triangulateio *m_in;
-    struct triangulateio *m_out;
-    struct triangulateio *m_vorout;
+    // Staging vectors
+    std::vector<Point2D> m_inPoints;
+    std::vector<Edge>    m_inSegments;
+    std::vector<Point2D> m_inHoles;
 
-    void initIO(struct triangulateio* io);
-    void freeIO(struct triangulateio* io, bool sharedHoles = false);
-    std::string buildSwitchString(const Options& opts);
+    // Result vectors
+    std::vector<Point2D>  m_outPoints;
+    std::vector<Triangle> m_outTriangles;
+    std::vector<Edge>     m_outEdges;
+    std::vector<Edge>     m_outVoronoi;
+
+    void syncOutput();
 };
 
 } // namespace triangle

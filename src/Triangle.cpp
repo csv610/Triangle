@@ -3,507 +3,291 @@
 #include <sstream>
 #include <cmath>
 #include <cstring>
-#include <map>
+#include <algorithm>
+#include <random>
 
-// Define REAL before including triangle.h as it expects it
 #ifndef REAL
 #define REAL double
 #endif
-
 #ifndef VOID
 #define VOID void
 #endif
-
 #ifndef ANSI_DECLARATORS
 #define ANSI_DECLARATORS
 #endif
 
-// Include the original C header
 extern "C" {
     #include "triangle.h"
 }
 
-// Define M_PI if not available
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
 namespace triangle {
 
-TriangleMesh::TriangleMesh() {
-    m_in = new struct triangulateio;
-    m_out = new struct triangulateio;
-    m_vorout = new struct triangulateio;
-    
-    initIO(m_in);
-    initIO(m_out);
-    initIO(m_vorout);
-}
+/**
+ * @brief Internal implementation structure to hide legacy C types.
+ */
+struct TriangleMesh::Impl {
+    struct triangulateio in, out, vorout;
 
-TriangleMesh::~TriangleMesh() {
-    freeIO(m_out);
-    freeIO(m_vorout);
-    
-    delete m_in;
-    delete m_out;
-    delete m_vorout;
-}
-
-void TriangleMesh::initIO(struct triangulateio* io) {
-    std::memset(io, 0, sizeof(struct triangulateio));
-}
-
-void TriangleMesh::freeIO(struct triangulateio* io, bool sharedHoles) {
-    if (io->pointlist) { trifree(io->pointlist); io->pointlist = NULL; }
-    if (io->pointattributelist) { trifree(io->pointattributelist); io->pointattributelist = NULL; }
-    if (io->pointmarkerlist) { trifree(io->pointmarkerlist); io->pointmarkerlist = NULL; }
-    
-    if (io->trianglelist) { trifree(io->trianglelist); io->trianglelist = NULL; }
-    if (io->triangleattributelist) { trifree(io->triangleattributelist); io->triangleattributelist = NULL; }
-    if (io->trianglearealist) { trifree(io->trianglearealist); io->trianglearealist = NULL; }
-    if (io->neighborlist) { trifree(io->neighborlist); io->neighborlist = NULL; }
-    
-    if (io->segmentlist) { trifree(io->segmentlist); io->segmentlist = NULL; }
-    if (io->segmentmarkerlist) { trifree(io->segmentmarkerlist); io->segmentmarkerlist = NULL; }
-    
-    if (!sharedHoles) {
-        if (io->holelist) { trifree(io->holelist); io->holelist = NULL; }
-        if (io->regionlist) { trifree(io->regionlist); io->regionlist = NULL; }
+    Impl() {
+        std::memset(&in, 0, sizeof(in));
+        std::memset(&out, 0, sizeof(out));
+        std::memset(&vorout, 0, sizeof(vorout));
     }
-    
-    if (io->edgelist) { trifree(io->edgelist); io->edgelist = NULL; }
-    if (io->edgemarkerlist) { trifree(io->edgemarkerlist); io->edgemarkerlist = NULL; }
-    if (io->normlist) { trifree(io->normlist); io->normlist = NULL; }
-    
-    initIO(io);
-}
+
+    void freeIO(struct triangulateio* io, bool sharedHoles = false) {
+        if (io->pointlist) { trifree(io->pointlist); io->pointlist = NULL; }
+        if (io->pointmarkerlist) { trifree(io->pointmarkerlist); io->pointmarkerlist = NULL; }
+        if (io->trianglelist) { trifree(io->trianglelist); io->trianglelist = NULL; }
+        if (io->segmentlist) { trifree(io->segmentlist); io->segmentlist = NULL; }
+        if (io->segmentmarkerlist) { trifree(io->segmentmarkerlist); io->segmentmarkerlist = NULL; }
+        if (io->edgelist) { trifree(io->edgelist); io->edgelist = NULL; }
+        if (io->edgemarkerlist) { trifree(io->edgemarkerlist); io->edgemarkerlist = NULL; }
+        if (io->normlist) { trifree(io->normlist); io->normlist = NULL; }
+        
+        if (!sharedHoles) {
+            if (io->holelist) { trifree(io->holelist); io->holelist = NULL; }
+        }
+    }
+
+    ~Impl() {
+        freeIO(&in);
+        freeIO(&out);
+        freeIO(&vorout);
+    }
+};
+
+TriangleMesh::TriangleMesh() : pImpl(new Impl()) {}
+TriangleMesh::~TriangleMesh() { delete pImpl; }
 
 void TriangleMesh::addPoint(double x, double y, int marker) {
-    m_points.push_back(Point(x, y, marker));
+    m_inPoints.emplace_back(x, y, marker);
 }
 
 void TriangleMesh::addSegment(int p1, int p2, int marker) {
-    m_segments.push_back(Segment(p1, p2, marker));
+    m_inSegments.emplace_back(p1, p2, marker);
 }
 
 void TriangleMesh::addHole(double x, double y) {
-    m_holes.push_back(std::make_pair(x, y));
+    m_inHoles.emplace_back(x, y, 0);
 }
 
-void TriangleMesh::addRegion(double x, double y, double attribute, double maxArea) {
-    std::vector<double> region = {x, y, attribute, maxArea};
-    m_regions.push_back(region);
-}
-
-void TriangleMesh::addPolygon(const std::vector<Point>& points, bool closed) {
-    int startIdx = m_points.size();
-    for (const auto& p : points) {
-        addPoint(p.x, p.y, p.marker);
-    }
-    int count = points.size();
-    if (count < 2) return;
-
-    for (int i = 0; i < count - 1; ++i) {
-        addSegment(startIdx + i, startIdx + i + 1, points[i].marker);
-    }
-    if (closed && count > 2) {
-        addSegment(startIdx + count - 1, startIdx, points[count-1].marker);
-    }
+void TriangleMesh::addPolygon(const std::vector<Point2D>& points, bool closed) {
+    int start = m_inPoints.size();
+    for (const auto& p : points) addPoint(p);
+    for (size_t i = 0; i < points.size() - 1; ++i) addSegment(start + i, start + i + 1, points[i].marker);
+    if (closed && points.size() > 2) addSegment(start + points.size() - 1, start, points.back().marker);
 }
 
 void TriangleMesh::addBoundingBox(double x1, double y1, double x2, double y2, int marker) {
-    std::vector<Point> box;
-    box.push_back(Point(x1, y1, marker));
-    box.push_back(Point(x2, y1, marker));
-    box.push_back(Point(x2, y2, marker));
-    box.push_back(Point(x1, y2, marker));
+    std::vector<Point2D> box = {{x1, y1, marker}, {x2, y1, marker}, {x2, y2, marker}, {x1, y2, marker}};
     addPolygon(box, true);
 }
 
-void TriangleMesh::addCircle(double cx, double cy, double radius, int numSegments, int marker) {
-    std::vector<Point> circle;
-    for (int i = 0; i < numSegments; ++i) {
-        double angle = 2.0 * M_PI * i / numSegments;
-        circle.push_back(Point(cx + radius * std::cos(angle), cy + radius * std::sin(angle), marker));
+void TriangleMesh::addCircle(double cx, double cy, double radius, int segments, int marker) {
+    std::vector<Point2D> circle;
+    for (int i = 0; i < segments; ++i) {
+        double a = 2.0 * M_PI * i / segments;
+        circle.emplace_back(cx + radius * std::cos(a), cy + radius * std::sin(a), marker);
     }
     addPolygon(circle, true);
 }
 
-void TriangleMesh::setTargetEdgeLength(double length) {
-    // Area of equilateral triangle A = (sqrt(3)/4) * L^2
-    m_targetArea = (std::sqrt(3.0) / 4.0) * length * length;
-}
+bool TriangleMesh::triangulate(const Options& opts) {
+    pImpl->freeIO(&pImpl->out, true);
+    pImpl->freeIO(&pImpl->vorout, true);
 
-std::string TriangleMesh::buildSwitchString(const Options& opts) {
-    std::stringstream ss;
-    if (m_segments.size() > 0) ss << "p";
-    if (opts.quality) {
-        ss << "q";
-        if (opts.minAngle > 0) ss << opts.minAngle;
+    // Prepare In
+    pImpl->in.numberofpoints = m_inPoints.size();
+    pImpl->in.pointlist = (REAL*)malloc(pImpl->in.numberofpoints * 2 * sizeof(REAL));
+    pImpl->in.pointmarkerlist = (int*)malloc(pImpl->in.numberofpoints * sizeof(int));
+    for (int i = 0; i < pImpl->in.numberofpoints; ++i) {
+        pImpl->in.pointlist[i * 2] = m_inPoints[i].x;
+        pImpl->in.pointlist[i * 2 + 1] = m_inPoints[i].y;
+        pImpl->in.pointmarkerlist[i] = m_inPoints[i].marker;
     }
+
+    if (!m_inSegments.empty()) {
+        pImpl->in.numberofsegments = m_inSegments.size();
+        pImpl->in.segmentlist = (int*)malloc(pImpl->in.numberofsegments * 2 * sizeof(int));
+        pImpl->in.segmentmarkerlist = (int*)malloc(pImpl->in.numberofsegments * sizeof(int));
+        for (int i = 0; i < pImpl->in.numberofsegments; ++i) {
+            pImpl->in.segmentlist[i * 2] = m_inSegments[i].p[0];
+            pImpl->in.segmentlist[i * 2 + 1] = m_inSegments[i].p[1];
+            pImpl->in.segmentmarkerlist[i] = m_inSegments[i].marker;
+        }
+    }
+
+    if (!m_inHoles.empty()) {
+        pImpl->in.numberofholes = m_inHoles.size();
+        pImpl->in.holelist = (REAL*)malloc(pImpl->in.numberofholes * 2 * sizeof(REAL));
+        for (int i = 0; i < pImpl->in.numberofholes; ++i) {
+            pImpl->in.holelist[i * 2] = m_inHoles[i].x;
+            pImpl->in.holelist[i * 2 + 1] = m_inHoles[i].y;
+        }
+    }
+
+    std::stringstream ss;
+    if (!m_inSegments.empty()) ss << "p";
+    if (opts.quality) { ss << "q" << opts.minAngle; }
     if (opts.maxArea > 0) ss << "a" << opts.maxArea;
-    else if (m_targetArea > 0) ss << "a" << m_targetArea;
-    
     if (opts.voronoi) ss << "v";
     if (opts.conforming) ss << "D";
     if (opts.quiet) ss << "Q";
-    if (opts.zeroBased) ss << "z";
-    if (opts.computeNeighbors) ss << "n";
-    if (opts.computeEdges) ss << "e";
-    
+    ss << "ez"; // Always edges and zero-based
     ss << opts.extraSwitches;
-    return ss.str();
-}
 
-bool TriangleMesh::triangulate(const Options& opts) {
-    // Clear previous output (but don't free holelist/regionlist since they are pointers to input)
-    freeIO(m_out, true); // true = shared pointers
-    freeIO(m_vorout, true);
-    
-    // Prepare input
-    m_in->numberofpoints = m_points.size();
-    m_in->pointlist = (REAL*)malloc(m_in->numberofpoints * 2 * sizeof(REAL));
-    m_in->pointmarkerlist = (int*)malloc(m_in->numberofpoints * sizeof(int));
-    for (int i = 0; i < m_in->numberofpoints; ++i) {
-        m_in->pointlist[i * 2] = m_points[i].x;
-        m_in->pointlist[i * 2 + 1] = m_points[i].y;
-        m_in->pointmarkerlist[i] = m_points[i].marker;
-    }
-
-    if (!m_segments.empty()) {
-        m_in->numberofsegments = m_segments.size();
-        m_in->segmentlist = (int*)malloc(m_in->numberofsegments * 2 * sizeof(int));
-        m_in->segmentmarkerlist = (int*)malloc(m_in->numberofsegments * sizeof(int));
-        for (int i = 0; i < m_in->numberofsegments; ++i) {
-            m_in->segmentlist[i * 2] = m_segments[i].p1;
-            m_in->segmentlist[i * 2 + 1] = m_segments[i].p2;
-            m_in->segmentmarkerlist[i] = m_segments[i].marker;
-        }
-    }
-
-    if (!m_holes.empty()) {
-        m_in->numberofholes = m_holes.size();
-        m_in->holelist = (REAL*)malloc(m_in->numberofholes * 2 * sizeof(REAL));
-        for (int i = 0; i < m_in->numberofholes; ++i) {
-            m_in->holelist[i * 2] = m_holes[i].first;
-            m_in->holelist[i * 2 + 1] = m_holes[i].second;
-        }
-    }
-
-    if (!m_regions.empty()) {
-        m_in->numberofregions = m_regions.size();
-        m_in->regionlist = (REAL*)malloc(m_in->numberofregions * 4 * sizeof(REAL));
-        for (int i = 0; i < m_in->numberofregions; ++i) {
-            m_in->regionlist[i * 4] = m_regions[i][0];
-            m_in->regionlist[i * 4 + 1] = m_regions[i][1];
-            m_in->regionlist[i * 4 + 2] = m_regions[i][2];
-            m_in->regionlist[i * 4 + 3] = m_regions[i][3];
-        }
-    }
-
-    std::string switches = buildSwitchString(opts);
-    
-    char* sw = strdup(switches.c_str());
-    ::triangulate(sw, m_in, m_out, opts.voronoi ? m_vorout : NULL);
+    char* sw = strdup(ss.str().c_str());
+    ::triangulate(sw, &pImpl->in, &pImpl->out, opts.voronoi ? &pImpl->vorout : NULL);
     free(sw);
 
-    // IMPORTANT: Triangle copies the pointers holelist and regionlist from 'in' to 'out'.
-    // To avoid double freeing them (since we free m_in right after), we NULL them in 'out'.
-    m_out->holelist = NULL;
-    m_out->regionlist = NULL;
-
-    // Clean up in for next run
-    freeIO(m_in);
-
+    pImpl->out.holelist = NULL; // Shared pointer protection
+    pImpl->freeIO(&pImpl->in);
+    
+    syncOutput();
     return true;
 }
 
-size_t TriangleMesh::numPoints() const { return m_out->numberofpoints; }
-TriangleMesh::Point TriangleMesh::getPoint(size_t index) const {
-    return Point(m_out->pointlist[index * 2], m_out->pointlist[index * 2 + 1], 
-            m_out->pointmarkerlist ? m_out->pointmarkerlist[index] : 0);
-}
+void TriangleMesh::syncOutput() {
+    m_outPoints.clear();
+    for (int i = 0; i < pImpl->out.numberofpoints; ++i) {
+        m_outPoints.emplace_back(pImpl->out.pointlist[i * 2], pImpl->out.pointlist[i * 2 + 1], 
+                               pImpl->out.pointmarkerlist ? pImpl->out.pointmarkerlist[i] : 0);
+    }
 
-size_t TriangleMesh::numTriangles() const { return m_out->numberoftriangles; }
-void TriangleMesh::getTriangle(size_t index, int& p1, int& p2, int& p3) const {
-    p1 = m_out->trianglelist[index * 3];
-    p2 = m_out->trianglelist[index * 3 + 1];
-    p3 = m_out->trianglelist[index * 3 + 2];
-}
+    m_outTriangles.clear();
+    for (int i = 0; i < pImpl->out.numberoftriangles; ++i) {
+        m_outTriangles.emplace_back(pImpl->out.trianglelist[i * 3], 
+                                  pImpl->out.trianglelist[i * 3 + 1], 
+                                  pImpl->out.trianglelist[i * 3 + 2]);
+    }
 
-size_t TriangleMesh::numEdges() const { return m_out->numberofedges; }
-void TriangleMesh::getEdge(size_t index, int& p1, int& p2) const {
-    p1 = m_out->edgelist[index * 2];
-    p2 = m_out->edgelist[index * 2 + 1];
-}
+    m_outEdges.clear();
+    for (int i = 0; i < pImpl->out.numberofedges; ++i) {
+        m_outEdges.emplace_back(pImpl->out.edgelist[i * 2], pImpl->out.edgelist[i * 2 + 1], 
+                              pImpl->out.edgemarkerlist ? pImpl->out.edgemarkerlist[i] : 0);
+    }
 
-size_t TriangleMesh::numVoronoiEdges() const { return m_vorout->numberofedges; }
-void TriangleMesh::getVoronoiEdge(size_t index, int& p1, int& p2) const {
-    p1 = m_vorout->edgelist[index * 2];
-    p2 = m_vorout->edgelist[index * 2 + 1];
+    m_outVoronoi.clear();
+    if (pImpl->vorout.edgelist) {
+        for (int i = 0; i < pImpl->vorout.numberofedges; ++i) {
+            m_outVoronoi.emplace_back(pImpl->vorout.edgelist[i * 2], pImpl->vorout.edgelist[i * 2 + 1]);
+        }
+    }
 }
 
 void TriangleMesh::smooth(int iterations) {
-    if (numPoints() == 0) return;
-
+    if (m_outPoints.empty()) return;
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<double> next_x(numPoints(), 0.0);
-        std::vector<double> next_y(numPoints(), 0.0);
-        std::vector<int> count(numPoints(), 0);
-
-        for (int i = 0; i < numTriangles(); ++i) {
-            int p[3];
-            getTriangle(i, p[0], p[1], p[2]);
+        std::vector<double> nx(m_outPoints.size(), 0), ny(m_outPoints.size(), 0);
+        std::vector<int> count(m_outPoints.size(), 0);
+        for (const auto& t : m_outTriangles) {
             for (int j = 0; j < 3; ++j) {
-                int self = p[j];
-                int n1 = p[(j + 1) % 3];
-                int n2 = p[(j + 2) % 3];
-                
-                next_x[self] += (m_out->pointlist[n1 * 2] + m_out->pointlist[n2 * 2]);
-                next_y[self] += (m_out->pointlist[n1 * 2 + 1] + m_out->pointlist[n2 * 2 + 1]);
-                count[self] += 2;
+                int s = t.p[j], n1 = t.p[(j+1)%3], n2 = t.p[(j+2)%3];
+                nx[s] += m_outPoints[n1].x + m_outPoints[n2].x;
+                ny[s] += m_outPoints[n1].y + m_outPoints[n2].y;
+                count[s] += 2;
             }
         }
-
-        for (int i = 0; i < numPoints(); ++i) {
-            if (m_out->pointmarkerlist && m_out->pointmarkerlist[i] == 0 && count[i] > 0) {
-                m_out->pointlist[i * 2] = next_x[i] / count[i];
-                m_out->pointlist[i * 2 + 1] = next_y[i] / count[i];
+        for (size_t i = 0; i < m_outPoints.size(); ++i) {
+            if (m_outPoints[i].marker == 0 && count[i] > 0) {
+                m_outPoints[i].x = nx[i] / count[i];
+                m_outPoints[i].y = ny[i] / count[i];
             }
         }
     }
 }
 
 void TriangleMesh::relaxVoronoi(int iterations) {
-    if (numPoints() == 0 || numTriangles() == 0) return;
-
+    if (m_outPoints.empty() || m_outTriangles.empty()) return;
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<double> next_x(numPoints());
-        std::vector<double> next_y(numPoints());
-        
-        // 1. Build vertex-to-triangle adjacency
-        std::vector<std::vector<int> > v2t(numPoints());
-        for (size_t i = 0; i < numTriangles(); ++i) {
-            int p1, p2, p3;
-            getTriangle(i, p1, p2, p3);
-            v2t[p1].push_back(i);
-            v2t[p2].push_back(i);
-            v2t[p3].push_back(i);
+        std::vector<std::vector<int>> v2t(m_outPoints.size());
+        for (size_t i = 0; i < m_outTriangles.size(); ++i) {
+            for (int j=0; j<3; ++j) v2t[m_outTriangles[i].p[j]].push_back(i);
         }
-
-        // 2. Precompute circumcenters of all triangles
-        struct Vec2 { double x, y; };
-        std::vector<Vec2> circumcenters(numTriangles());
-        for (size_t i = 0; i < numTriangles(); ++i) {
-            int p1, p2, p3;
-            getTriangle(i, p1, p2, p3);
-            double ax = m_out->pointlist[p1 * 2],     ay = m_out->pointlist[p1 * 2 + 1];
-            double bx = m_out->pointlist[p2 * 2],     by = m_out->pointlist[p2 * 2 + 1];
-            double cx = m_out->pointlist[p3 * 2],     cy = m_out->pointlist[p3 * 2 + 1];
-
+        std::vector<Point2D> circumcenters;
+        for (const auto& t : m_outTriangles) {
+            double ax = m_outPoints[t.p[0]].x, ay = m_outPoints[t.p[0]].y;
+            double bx = m_outPoints[t.p[1]].x, by = m_outPoints[t.p[1]].y;
+            double cx = m_outPoints[t.p[2]].x, cy = m_outPoints[t.p[2]].y;
             double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-            if (std::abs(d) < 1e-9) {
-                circumcenters[i] = {(ax + bx + cx) / 3.0, (ay + by + cy) / 3.0};
-                continue;
+            if (std::abs(d) < 1e-9) circumcenters.emplace_back((ax+bx+cx)/3, (ay+by+cy)/3);
+            else {
+                double a2 = ax*ax+ay*ay, b2 = bx*bx+by*by, c2 = cx*cx+cy*cy;
+                circumcenters.emplace_back((a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d, (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d);
             }
-
-            double a2 = ax * ax + ay * ay;
-            double b2 = bx * bx + by * by;
-            double c2 = cx * cx + cy * cy;
-
-            double ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
-            double uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
-            circumcenters[i] = {ux, uy};
         }
-
-        // 3. Move internal vertices to the centroid of their Voronoi cell
-        for (size_t i = 0; i < numPoints(); ++i) {
-            next_x[i] = m_out->pointlist[i * 2];
-            next_y[i] = m_out->pointlist[i * 2 + 1];
-
-            if (m_out->pointmarkerlist && m_out->pointmarkerlist[i] != 0) continue; // Skip boundary
-            
-            const auto& tris = v2t[i];
-            if (tris.empty()) continue;
-
-            // Collect circumcenters for this vertex's Voronoi cell
-            std::vector<std::pair<double, Vec2> > sorted_cc;
-            for (int t_idx : tris) {
-                Vec2 cc = circumcenters[t_idx];
-                double angle = std::atan2(cc.y - next_y[i], cc.x - next_x[i]);
-                sorted_cc.push_back(std::make_pair(angle, cc));
-            }
-
-            // Sort counter-clockwise
-            std::sort(sorted_cc.begin(), sorted_cc.end(), [](const std::pair<double, Vec2>& a, const std::pair<double, Vec2>& b) {
-                return a.first < b.first;
-            });
-
-            // Calculate polygon centroid
-            double area = 0;
-            double cx = 0, cy = 0;
-            int k = sorted_cc.size();
-            for (int j = 0; j < k; ++j) {
-                Vec2 p1 = sorted_cc[j].second;
-                Vec2 p2 = sorted_cc[(j + 1) % k].second;
+        for (size_t i = 0; i < m_outPoints.size(); ++i) {
+            if (m_outPoints[i].marker != 0 || v2t[i].empty()) continue;
+            std::vector<std::pair<double, int>> sorted;
+            for (int tid : v2t[i]) sorted.push_back({std::atan2(circumcenters[tid].y - m_outPoints[i].y, circumcenters[tid].x - m_outPoints[i].x), tid});
+            std::sort(sorted.begin(), sorted.end());
+            double area = 0, cx = 0, cy = 0;
+            for (size_t j = 0; j < sorted.size(); ++j) {
+                const auto& p1 = circumcenters[sorted[j].second];
+                const auto& p2 = circumcenters[sorted[(j+1)%sorted.size()].second];
                 double cross = (p1.x * p2.y - p2.x * p1.y);
-                area += cross;
-                cx += (p1.x + p2.x) * cross;
-                cy += (p1.y + p2.y) * cross;
+                area += cross; cx += (p1.x + p2.x) * cross; cy += (p1.y + p2.y) * cross;
             }
-            area *= 0.5;
-
-            if (std::abs(area) > 1e-9) {
-                next_x[i] = cx / (6.0 * area);
-                next_y[i] = cy / (6.0 * area);
-            }
-        }
-
-        // Apply updates
-        for (size_t i = 0; i < numPoints(); ++i) {
-            m_out->pointlist[i * 2] = next_x[i];
-            m_out->pointlist[i * 2 + 1] = next_y[i];
+            if (std::abs(area) > 1e-9) { m_outPoints[i].x = cx / (3.0 * area); m_outPoints[i].y = cy / (3.0 * area); }
         }
     }
 }
 
 void TriangleMesh::relaxODT(int iterations) {
-    if (numPoints() == 0 || numTriangles() == 0) return;
-
+    if (m_outPoints.empty() || m_outTriangles.empty()) return;
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<double> next_x(numPoints());
-        std::vector<double> next_y(numPoints());
-        
-        // 1. Build vertex-to-triangle adjacency
-        std::vector<std::vector<int> > v2t(numPoints());
-        for (size_t i = 0; i < numTriangles(); ++i) {
-            int p1, p2, p3;
-            getTriangle(i, p1, p2, p3);
-            v2t[p1].push_back(i);
-            v2t[p2].push_back(i);
-            v2t[p3].push_back(i);
+        std::vector<std::vector<int>> v2t(m_outPoints.size());
+        for (size_t i = 0; i < m_outTriangles.size(); ++i) {
+            for (int j=0; j<3; ++j) v2t[m_outTriangles[i].p[j]].push_back(i);
         }
-
-        struct Vec2 { double x, y; };
-        std::vector<Vec2> circumcenters(numTriangles());
-        std::vector<double> areas(numTriangles());
-
-        // 2. Precompute circumcenters and areas
-        for (size_t i = 0; i < numTriangles(); ++i) {
-            int p1, p2, p3;
-            getTriangle(i, p1, p2, p3);
-            double ax = m_out->pointlist[p1 * 2],     ay = m_out->pointlist[p1 * 2 + 1];
-            double bx = m_out->pointlist[p2 * 2],     by = m_out->pointlist[p2 * 2 + 1];
-            double cx = m_out->pointlist[p3 * 2],     cy = m_out->pointlist[p3 * 2 + 1];
-
-            // Area calculation
-            areas[i] = 0.5 * std::abs(ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-
-            // Circumcenter calculation
-            double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-            if (std::abs(d) < 1e-9) {
-                circumcenters[i] = {(ax + bx + cx) / 3.0, (ay + by + cy) / 3.0};
-            } else {
-                double a2 = ax * ax + ay * ay;
-                double b2 = bx * bx + by * by;
-                double c2 = cx * cx + cy * cy;
-                circumcenters[i] = {
-                    (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d,
-                    (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d
-                };
+        std::vector<Point2D> cc;
+        std::vector<double> areas;
+        for (const auto& t : m_outTriangles) {
+            double ax = m_outPoints[t.p[0]].x, ay = m_outPoints[t.p[0]].y;
+            double bx = m_outPoints[t.p[1]].x, by = m_outPoints[t.p[1]].y;
+            double cx = m_outPoints[t.p[2]].x, cy = m_outPoints[t.p[2]].y;
+            areas.push_back(0.5 * std::abs(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by)));
+            double d = 2.0 * (ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+            if (std::abs(d) < 1e-9) cc.emplace_back((ax+bx+cx)/3, (ay+by+cy)/3);
+            else {
+                double a2 = ax*ax+ay*ay, b2 = bx*bx+by*by, c2 = cx*cx+cy*cy;
+                cc.emplace_back((a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d, (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d);
             }
         }
-
-        // 3. Move vertices (ODT Rule: Area-weighted average of circumcenters)
-        for (size_t i = 0; i < numPoints(); ++i) {
-            next_x[i] = m_out->pointlist[i * 2];
-            next_y[i] = m_out->pointlist[i * 2 + 1];
-
-            if (m_out->pointmarkerlist && m_out->pointmarkerlist[i] != 0) continue;
-
-            const auto& tris = v2t[i];
-            if (tris.empty()) continue;
-
-            double sum_area = 0;
-            double cx = 0, cy = 0;
-            for (int t_idx : tris) {
-                double a = areas[t_idx];
-                cx += circumcenters[t_idx].x * a;
-                cy += circumcenters[t_idx].y * a;
-                sum_area += a;
-            }
-
-            if (sum_area > 1e-9) {
-                next_x[i] = cx / sum_area;
-                next_y[i] = cy / sum_area;
-            }
-        }
-
-        for (size_t i = 0; i < numPoints(); ++i) {
-            m_out->pointlist[i * 2] = next_x[i];
-            m_out->pointlist[i * 2 + 1] = next_y[i];
+        for (size_t i = 0; i < m_outPoints.size(); ++i) {
+            if (m_outPoints[i].marker != 0 || v2t[i].empty()) continue;
+            double sa = 0, scx = 0, scy = 0;
+            for (int tid : v2t[i]) { double a = areas[tid]; scx += cc[tid].x * a; scy += cc[tid].y * a; sa += a; }
+            if (sa > 1e-9) { m_outPoints[i].x = scx / sa; m_outPoints[i].y = scy / sa; }
         }
     }
 }
 
 void TriangleMesh::generateCVT(int numPoints, int iterations) {
-    if (m_points.empty() && m_segments.empty()) {
-        // Default to unit square if no geometry defined
-        addBoundingBox(0, 0, 1, 1);
-    }
-
-    // 1. Calculate bounding box of current geometry
+    if (m_inPoints.empty()) addBoundingBox(0, 0, 1, 1);
     double minX = 1e30, minY = 1e30, maxX = -1e30, maxY = -1e30;
-    for (const auto& p : m_points) {
-        minX = std::min(minX, p.x); minY = std::min(minY, p.y);
-        maxX = std::max(maxX, p.x); maxY = std::max(maxY, p.y);
-    }
-
-    // 2. Generate random internal points
-    std::mt19937 rng(42); // Fixed seed for reproducibility
-    std::uniform_real_distribution<double> dist_x(minX, maxX);
-    std::uniform_real_distribution<double> dist_y(minY, maxY);
-
-    for (int i = 0; i < numPoints; ++i) {
-        addPoint(dist_x(rng), dist_y(rng), 0);
-    }
-
-    // 3. Iterative Optimization
-    // For CVT, we must re-triangulate in each step because the topology (neighbors) 
-    // changes as points move significantly from their random starting positions.
-    Options opts;
-    opts.quiet = true;
-    opts.quality = false; // Just basic triangulation for points
-
+    for (const auto& p : m_inPoints) { minX = std::min(minX, p.x); minY = std::min(minY, p.y); maxX = std::max(maxX, p.x); maxY = std::max(maxY, p.y); }
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<double> dx(minX, maxX), dy(minY, maxY);
+    for (int i = 0; i < numPoints; ++i) addPoint(dx(rng), dy(rng), 0);
+    Options opts; opts.quiet = true; opts.quality = false;
     for (int i = 0; i < iterations; ++i) {
-        triangulate(opts);
-        relaxVoronoi(1);
-        
-        // Feed the relaxed points back into the input for the next triangulation
-        std::vector<Point> new_points;
-        // Keep original points that have markers (boundaries)
-        for (const auto& p : m_points) {
-            if (p.marker != 0) new_points.push_back(p);
-        }
-        // Add all points from the output (which includes the relaxed internal points)
-        for (size_t j = 0; j < numPoints(); ++j) {
-            Point p = getPoint(j);
-            if (p.marker == 0) new_points.push_back(p);
-        }
-        m_points = new_points;
+        triangulate(opts); relaxVoronoi(1);
+        std::vector<Point2D> next;
+        for (const auto& p : m_inPoints) if (p.marker != 0) next.push_back(p);
+        for (const auto& p : m_outPoints) if (p.marker == 0) next.push_back(p);
+        m_inPoints = next;
     }
-    
-    // Final triangulation with quality constraints if desired
-    opts.quality = true;
-    triangulate(opts);
+    opts.quality = true; triangulate(opts);
 }
 
 void TriangleMesh::clear() {
-    m_points.clear();
-    m_segments.clear();
-    m_holes.clear();
-    m_regions.clear();
-    m_targetArea = -1.0;
+    m_inPoints.clear(); m_inSegments.clear(); m_inHoles.clear();
+    m_outPoints.clear(); m_outTriangles.clear(); m_outEdges.clear(); m_outVoronoi.clear();
 }
 
 } // namespace triangle
