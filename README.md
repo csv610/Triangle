@@ -1,39 +1,18 @@
-# Triangle: A Two-Dimensional Quality Mesh Generator
+# Triangle: Modern 2D Quality Mesh Generator
 
-This repository is a **simple port** of the original **Triangle** library, a world-renowned tool for generating high-quality 2D meshes, Delaunay triangulations, and Voronoi diagrams.
+This repository is a modernized, professional-grade C++11 port of the original **Triangle** library. It provides a clean, encapsulated interface for generating high-quality 2D meshes, Delaunay triangulations, and Voronoi diagrams while stripping away legacy dependencies like X11.
 
-## Disclaimer & Credits
+## Key Modern Features
+*   **Professional Encapsulation**: Uses the PIMPL pattern to completely hide legacy C structures and implementation details from your project.
+*   **Modern C++ API**: Inputs and outputs use standard `std::vector` containers and clean types like `Point2D`, `Triangle`, and `VoroFace`.
+*   **Advanced Optimization Suite**:
+    *   **Lloyd's Relaxation**: For geometric symmetry and "honeycomb" Voronoi cells.
+    *   **Optimal Delaunay Triangulation (ODT)**: Minimizes interpolation error for physics simulations.
+    *   **Centroidal Voronoi Tessellation (CVT)**: One-shot generator for organic point distributions.
+*   **Per-Site Voronoi Access**: Access the Voronoi diagram as a collection of ordered, closed or open polygons.
+*   **macOS & Linux Optimized**: Removed X11 dependencies for easy integration into modern development environments.
 
-**Absolutely no credit is taken for the original algorithms, logic, or implementation of Triangle.** 
-
-The original code was authored by:
-**Jonathan Richard Shewchuk**
-University of California at Berkeley
-
-All intellectual property rights and the core engineering remain with the original author. This repository serves only as a modernized and streamlined port for specific environments.
-
----
-
-## Contributions in this Port
-
-This version includes the following modifications and enhancements:
-
-1.  **Removal of `showme` on macOS**: The `showme` visualization tool has been excluded from the macOS build process to focus on the core library functionality.
-2.  **New Benchmark Suite**: Added a comprehensive set of benchmark codes to evaluate performance across different operations:
-    *   `benchmark_delaunay`: Evaluates Delaunay triangulation performance.
-    *   `benchmark_hull`: Benchmarks convex hull generation.
-    *   `benchmark_voronoi`: Measures Voronoi diagram construction speed.
-3.  **Removal of X11 Dependencies**: All X11-dependent code and build requirements have been removed, making the library easier to compile and integrate into modern, headless, or cross-platform environments.
-4.  **Modern C++ Wrapper**: Added a high-level C++11 interface (`TriangleMesh`) providing:
-    *   **RAII Memory Management**: Automatic cleanup using `trifree`.
-    *   **High-Level Primitives**: Easy methods to add polygons, circles, and bounding boxes.
-    *   **Centroidal Voronoi Relaxation (Lloyd's Algorithm)**: Smooth existing meshes into high-quality isotropic triangulations.
-    *   **Optimal Delaunay Triangulation (ODT)**: A mathematically superior relaxation for scientific computing that minimizes interpolation error.
-    *   **CVT Generation**: A "one-shot" generator to fill any domain with a perfectly distributed set of organic-looking cells.
-
----
-
-## C++ Usage Example
+## Quick C++ Usage
 
 ```cpp
 #include "src/Triangle.hpp"
@@ -41,35 +20,25 @@ This version includes the following modifications and enhancements:
 triangle::TriangleMesh mesh;
 
 // Define a domain
-mesh.addBoundingBox(0, 0, 100, 100);
-mesh.addCircle(50, 50, 20, 30); // Add a circular boundary
-mesh.addHole(50, 50);          // Make the circle a hole
+mesh.addBoundingBox(0, 0, 10, 10);
+mesh.addCircle(5, 5, 2, 20); // Add a circular hole
+mesh.addHole(5, 5);
 
 // Generate 500 points with Centroidal Voronoi distribution
 mesh.generateCVT(500, 20); 
 
-// Access results
-std::cout << "Generated " << mesh.numTriangles() << " quality triangles." << std::endl;
+// Access results directly
+for (const auto& face : mesh.voroFaces()) {
+    if (face.isClosed) {
+        // Process internal Voronoi cell...
+    }
+}
 ```
 
-## Original Features
+## Credits
+**Absolutely no credit is taken for the original algorithms.**
+Original author: **Jonathan Richard Shewchuk** (UC Berkeley).
+This port maintains all original copyright notices and focuses on modernization, documentation, and advanced optimization helpers.
 
-Triangle remains one of the most robust tools for:
-*   **Delaunay Triangulations**: Exact and constrained.
-*   **Quality Meshing**: Generating meshes with no small or large angles, suitable for Finite Element Analysis (FEA).
-*   **Voronoi Diagrams**: Reliable construction from point sets.
-*   **Robust Arithmetic**: Using adaptive precision floating-point arithmetic for geometric predicates.
-
-## Compilation
-
-The project uses a standard `makefile`. To build the library and benchmarks:
-
-```bash
-make
-```
-
-The binaries will be generated in the `bin/` directory.
-
-## Licensing
-
-Please refer to the original `README` and the comments in `src/triangle.c` for licensing details. The original author's copyright notices must be preserved in all copies of the code.
+## License
+Please refer to `src/triangle.c` for the original licensing terms. This port is provided as-is for research and professional use.
