@@ -274,6 +274,99 @@ void TriangleMesh::smooth(int iterations) {
     }
 }
 
+void TriangleMesh::relaxVoronoi(int iterations) {
+    if (numPoints() == 0 || numTriangles() == 0) return;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+        std::vector<double> next_x(numPoints());
+        std::vector<double> next_y(numPoints());
+        
+        // 1. Build vertex-to-triangle adjacency
+        std::vector<std::vector<int> > v2t(numPoints());
+        for (size_t i = 0; i < numTriangles(); ++i) {
+            int p1, p2, p3;
+            getTriangle(i, p1, p2, p3);
+            v2t[p1].push_back(i);
+            v2t[p2].push_back(i);
+            v2t[p3].push_back(i);
+        }
+
+        // 2. Precompute circumcenters of all triangles
+        struct Vec2 { double x, y; };
+        std::vector<Vec2> circumcenters(numTriangles());
+        for (size_t i = 0; i < numTriangles(); ++i) {
+            int p1, p2, p3;
+            getTriangle(i, p1, p2, p3);
+            double ax = m_out->pointlist[p1 * 2],     ay = m_out->pointlist[p1 * 2 + 1];
+            double bx = m_out->pointlist[p2 * 2],     by = m_out->pointlist[p2 * 2 + 1];
+            double cx = m_out->pointlist[p3 * 2],     cy = m_out->pointlist[p3 * 2 + 1];
+
+            double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+            if (std::abs(d) < 1e-9) {
+                circumcenters[i] = {(ax + bx + cx) / 3.0, (ay + by + cy) / 3.0};
+                continue;
+            }
+
+            double a2 = ax * ax + ay * ay;
+            double b2 = bx * bx + by * by;
+            double c2 = cx * cx + cy * cy;
+
+            double ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+            double uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+            circumcenters[i] = {ux, uy};
+        }
+
+        // 3. Move internal vertices to the centroid of their Voronoi cell
+        for (size_t i = 0; i < numPoints(); ++i) {
+            next_x[i] = m_out->pointlist[i * 2];
+            next_y[i] = m_out->pointlist[i * 2 + 1];
+
+            if (m_out->pointmarkerlist && m_out->pointmarkerlist[i] != 0) continue; // Skip boundary
+            
+            const auto& tris = v2t[i];
+            if (tris.empty()) continue;
+
+            // Collect circumcenters for this vertex's Voronoi cell
+            std::vector<std::pair<double, Vec2> > sorted_cc;
+            for (int t_idx : tris) {
+                Vec2 cc = circumcenters[t_idx];
+                double angle = std::atan2(cc.y - next_y[i], cc.x - next_x[i]);
+                sorted_cc.push_back(std::make_pair(angle, cc));
+            }
+
+            // Sort counter-clockwise
+            std::sort(sorted_cc.begin(), sorted_cc.end(), [](const std::pair<double, Vec2>& a, const std::pair<double, Vec2>& b) {
+                return a.first < b.first;
+            });
+
+            // Calculate polygon centroid
+            double area = 0;
+            double cx = 0, cy = 0;
+            int k = sorted_cc.size();
+            for (int j = 0; j < k; ++j) {
+                Vec2 p1 = sorted_cc[j].second;
+                Vec2 p2 = sorted_cc[(j + 1) % k].second;
+                double cross = (p1.x * p2.y - p2.x * p1.y);
+                area += cross;
+                cx += (p1.x + p2.x) * cross;
+                cy += (p1.y + p2.y) * cross;
+            }
+            area *= 0.5;
+
+            if (std::abs(area) > 1e-9) {
+                next_x[i] = cx / (6.0 * area);
+                next_y[i] = cy / (6.0 * area);
+            }
+        }
+
+        // Apply updates
+        for (size_t i = 0; i < numPoints(); ++i) {
+            m_out->pointlist[i * 2] = next_x[i];
+            m_out->pointlist[i * 2 + 1] = next_y[i];
+        }
+    }
+}
+
 void TriangleMesh::clear() {
     m_points.clear();
     m_segments.clear();

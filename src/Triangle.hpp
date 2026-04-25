@@ -74,6 +74,7 @@ public:
     
     // --- Advanced Features ---
     void smooth(int iterations = 1);
+    void relaxVoronoi(int iterations = 1);
     void clear();
 
 private:
