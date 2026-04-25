@@ -75,6 +75,7 @@ public:
     // --- Advanced Features ---
     void smooth(int iterations = 1);
     void relaxVoronoi(int iterations = 1);
+    void relaxODT(int iterations = 1);
     void generateCVT(int numPoints, int iterations = 20);
     void clear();
 

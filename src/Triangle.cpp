@@ -367,6 +367,85 @@ void TriangleMesh::relaxVoronoi(int iterations) {
     }
 }
 
+void TriangleMesh::relaxODT(int iterations) {
+    if (numPoints() == 0 || numTriangles() == 0) return;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+        std::vector<double> next_x(numPoints());
+        std::vector<double> next_y(numPoints());
+        
+        // 1. Build vertex-to-triangle adjacency
+        std::vector<std::vector<int> > v2t(numPoints());
+        for (size_t i = 0; i < numTriangles(); ++i) {
+            int p1, p2, p3;
+            getTriangle(i, p1, p2, p3);
+            v2t[p1].push_back(i);
+            v2t[p2].push_back(i);
+            v2t[p3].push_back(i);
+        }
+
+        struct Vec2 { double x, y; };
+        std::vector<Vec2> circumcenters(numTriangles());
+        std::vector<double> areas(numTriangles());
+
+        // 2. Precompute circumcenters and areas
+        for (size_t i = 0; i < numTriangles(); ++i) {
+            int p1, p2, p3;
+            getTriangle(i, p1, p2, p3);
+            double ax = m_out->pointlist[p1 * 2],     ay = m_out->pointlist[p1 * 2 + 1];
+            double bx = m_out->pointlist[p2 * 2],     by = m_out->pointlist[p2 * 2 + 1];
+            double cx = m_out->pointlist[p3 * 2],     cy = m_out->pointlist[p3 * 2 + 1];
+
+            // Area calculation
+            areas[i] = 0.5 * std::abs(ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+
+            // Circumcenter calculation
+            double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+            if (std::abs(d) < 1e-9) {
+                circumcenters[i] = {(ax + bx + cx) / 3.0, (ay + by + cy) / 3.0};
+            } else {
+                double a2 = ax * ax + ay * ay;
+                double b2 = bx * bx + by * by;
+                double c2 = cx * cx + cy * cy;
+                circumcenters[i] = {
+                    (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d,
+                    (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d
+                };
+            }
+        }
+
+        // 3. Move vertices (ODT Rule: Area-weighted average of circumcenters)
+        for (size_t i = 0; i < numPoints(); ++i) {
+            next_x[i] = m_out->pointlist[i * 2];
+            next_y[i] = m_out->pointlist[i * 2 + 1];
+
+            if (m_out->pointmarkerlist && m_out->pointmarkerlist[i] != 0) continue;
+
+            const auto& tris = v2t[i];
+            if (tris.empty()) continue;
+
+            double sum_area = 0;
+            double cx = 0, cy = 0;
+            for (int t_idx : tris) {
+                double a = areas[t_idx];
+                cx += circumcenters[t_idx].x * a;
+                cy += circumcenters[t_idx].y * a;
+                sum_area += a;
+            }
+
+            if (sum_area > 1e-9) {
+                next_x[i] = cx / sum_area;
+                next_y[i] = cy / sum_area;
+            }
+        }
+
+        for (size_t i = 0; i < numPoints(); ++i) {
+            m_out->pointlist[i * 2] = next_x[i];
+            m_out->pointlist[i * 2 + 1] = next_y[i];
+        }
+    }
+}
+
 void TriangleMesh::generateCVT(int numPoints, int iterations) {
     if (m_points.empty() && m_segments.empty()) {
         // Default to unit square if no geometry defined

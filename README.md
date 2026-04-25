@@ -28,6 +28,7 @@ This version includes the following modifications and enhancements:
     *   **RAII Memory Management**: Automatic cleanup using `trifree`.
     *   **High-Level Primitives**: Easy methods to add polygons, circles, and bounding boxes.
     *   **Centroidal Voronoi Relaxation (Lloyd's Algorithm)**: Smooth existing meshes into high-quality isotropic triangulations.
+    *   **Optimal Delaunay Triangulation (ODT)**: A mathematically superior relaxation for scientific computing that minimizes interpolation error.
     *   **CVT Generation**: A "one-shot" generator to fill any domain with a perfectly distributed set of organic-looking cells.
 
 ---
