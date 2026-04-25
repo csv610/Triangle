@@ -25,6 +25,13 @@ struct Edge {
     Edge(int p1 = 0, int p2 = 0, int _m = 0) : marker(_m) { p[0] = p1; p[1] = p2; }
 };
 
+struct VoroFace {
+    int siteIndex;                  // Index of the input point (site)
+    std::vector<Point2D> vertices;  // Ordered vertices of the Voronoi cell
+    bool isClosed;                  // False if the cell extends to infinity
+    VoroFace() : siteIndex(-1), isClosed(true) {}
+};
+
 /**
  * @brief Configuration options using modern types.
  */
@@ -72,6 +79,7 @@ public:
     const std::vector<Triangle>& triangles() const { return m_outTriangles; }
     const std::vector<Edge>&     edges()     const { return m_outEdges; }
     const std::vector<Edge>&     voronoi()   const { return m_outVoronoi; }
+    const std::vector<VoroFace>& voroFaces() const { return m_outVoroFaces; }
 
     void clear();
 
@@ -90,6 +98,7 @@ private:
     std::vector<Triangle> m_outTriangles;
     std::vector<Edge>     m_outEdges;
     std::vector<Edge>     m_outVoronoi;
+    std::vector<VoroFace> m_outVoroFaces;
 
     void syncOutput();
 };

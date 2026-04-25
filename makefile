@@ -41,4 +41,7 @@ $(BIN)showme: $(SRC)showme.c
 
 distclean:
 	$(RM) $(BIN)triangle $(BIN)triangle.o $(BIN)tricall $(BIN)showme \
+		$(BIN)benchmark_hull $(BIN)benchmark_delaunay $(BIN)benchmark_voronoi $(BIN)Triangle.o $(BIN)test_modern_api $(BIN)test_voroface
+lean:
+	$(RM) $(BIN)triangle $(BIN)triangle.o $(BIN)tricall $(BIN)showme \
 		$(BIN)benchmark_hull $(BIN)benchmark_delaunay $(BIN)benchmark_voronoi $(BIN)Triangle.o $(BIN)test_modern_api

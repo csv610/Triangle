@@ -177,6 +177,55 @@ void TriangleMesh::syncOutput() {
             m_outVoronoi.emplace_back(pImpl->vorout.edgelist[i * 2], pImpl->vorout.edgelist[i * 2 + 1]);
         }
     }
+
+    // --- Voronoi Face Reconstruction ---
+    m_outVoroFaces.clear();
+    if (m_outPoints.empty() || m_outTriangles.empty()) return;
+
+    // 1. Map vertices to incident triangles
+    std::vector<std::vector<int>> v2t(m_outPoints.size());
+    for (size_t i = 0; i < m_outTriangles.size(); ++i) {
+        for (int j = 0; j < 3; ++j) v2t[m_outTriangles[i].p[j]].push_back(i);
+    }
+
+    // 2. Precompute all triangle circumcenters (these are the Voronoi vertices)
+    std::vector<Point2D> circumcenters;
+    for (const auto& t : m_outTriangles) {
+        double ax = m_outPoints[t.p[0]].x, ay = m_outPoints[t.p[0]].y;
+        double bx = m_outPoints[t.p[1]].x, by = m_outPoints[t.p[1]].y;
+        double cx = m_outPoints[t.p[2]].x, cy = m_outPoints[t.p[2]].y;
+        double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+        if (std::abs(d) < 1e-9) circumcenters.emplace_back((ax+bx+cx)/3, (ay+by+cy)/3);
+        else {
+            double a2 = ax*ax+ay*ay, b2 = bx*bx+by*by, c2 = cx*cx+cy*cy;
+            circumcenters.emplace_back((a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d, (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d);
+        }
+    }
+
+    // 3. For each point, build its Voronoi face
+    for (size_t i = 0; i < m_outPoints.size(); ++i) {
+        const auto& tris = v2t[i];
+        if (tris.empty()) continue;
+
+        VoroFace face;
+        face.siteIndex = i;
+        face.isClosed = (m_outPoints[i].marker == 0);
+
+        // Sort triangles around point i to get ordered Voronoi vertices
+        std::vector<std::pair<double, int>> sorted;
+        for (int tid : tris) {
+            double angle = std::atan2(circumcenters[tid].y - m_outPoints[i].y, 
+                                     circumcenters[tid].x - m_outPoints[i].x);
+            sorted.push_back({angle, tid});
+        }
+        std::sort(sorted.begin(), sorted.end());
+
+        for (const auto& s : sorted) {
+            face.vertices.push_back(circumcenters[s.second]);
+        }
+        
+        m_outVoroFaces.push_back(face);
+    }
 }
 
 void TriangleMesh::smooth(int iterations) {
@@ -287,7 +336,7 @@ void TriangleMesh::generateCVT(int numPoints, int iterations) {
 
 void TriangleMesh::clear() {
     m_inPoints.clear(); m_inSegments.clear(); m_inHoles.clear();
-    m_outPoints.clear(); m_outTriangles.clear(); m_outEdges.clear(); m_outVoronoi.clear();
+    m_outPoints.clear(); m_outTriangles.clear(); m_outEdges.clear(); m_outVoronoi.clear(); m_outVoroFaces.clear();
 }
 
 } // namespace triangle
