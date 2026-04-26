@@ -1,4 +1,4 @@
-#include "Triangle.hpp"
+#include "TriMeshGenerator.hpp"
 #include <iostream>
 #include <sstream>
 #include <cmath>
@@ -63,8 +63,8 @@ struct TriangleMesh::Impl {
 TriangleMesh::TriangleMesh() : pImpl(new Impl()) {}
 TriangleMesh::~TriangleMesh() { delete pImpl; }
 
-void TriangleMesh::addPoint(double x, double y, int marker) {
-    m_inPoints.emplace_back(x, y, marker);
+void TriangleMesh::addPoint(double x, double y, int marker, bool isFixed) {
+    m_inPoints.emplace_back(x, y, marker, isFixed);
 }
 
 void TriangleMesh::addSegment(int p1, int p2, int marker) {
@@ -96,7 +96,47 @@ void TriangleMesh::addCircle(double cx, double cy, double radius, int segments, 
     addPolygon(circle, true);
 }
 
+void TriangleMesh::refineSegments(double maxLength) {
+    if (maxLength <= 0) return;
+    std::vector<Edge> nextSegments;
+    for (const auto& s : m_inSegments) {
+        Point2D p1 = m_inPoints[s.p[0]];
+        Point2D p2 = m_inPoints[s.p[1]];
+        double dx = p2.x - p1.x;
+        double dy = p2.y - p1.y;
+        double len = std::sqrt(dx*dx + dy*dy);
+        
+        if (len > maxLength) {
+            int numSubSegments = std::ceil(len / maxLength);
+            int lastIdx = s.p[0];
+            for (int i = 1; i < numSubSegments; ++i) {
+                double t = (double)i / numSubSegments;
+                int newIdx = (int)m_inPoints.size();
+                m_inPoints.emplace_back(p1.x + t*dx, p1.y + t*dy, s.marker);
+                nextSegments.emplace_back(lastIdx, newIdx, s.marker);
+                lastIdx = newIdx;
+            }
+            nextSegments.emplace_back(lastIdx, s.p[1], s.marker);
+        } else {
+            nextSegments.push_back(s);
+        }
+    }
+    m_inSegments = nextSegments;
+}
+
 bool TriangleMesh::triangulate(const Options& opts) {
+    if (m_inPoints.size() < 3) {
+        // Clear previous output so we don't render stale data
+        m_outPoints.clear();
+        m_outTriangles.clear();
+        m_outEdges.clear();
+        m_outSegments.clear();
+        m_outVoronoi.clear();
+        m_outVoroFaces.clear();
+        return false;
+    }
+    resolveIntersections();
+    
     pImpl->freeIO(&pImpl->out, true);
     pImpl->freeIO(&pImpl->vorout, true);
 
@@ -154,8 +194,10 @@ bool TriangleMesh::triangulate(const Options& opts) {
 void TriangleMesh::syncOutput() {
     m_outPoints.clear();
     for (int i = 0; i < pImpl->out.numberofpoints; ++i) {
+        bool fixed = (i < (int)m_inPoints.size()) ? m_inPoints[i].isFixed : false;
         m_outPoints.emplace_back(pImpl->out.pointlist[i * 2], pImpl->out.pointlist[i * 2 + 1], 
-                               pImpl->out.pointmarkerlist ? pImpl->out.pointmarkerlist[i] : 0);
+                               pImpl->out.pointmarkerlist ? pImpl->out.pointmarkerlist[i] : 0,
+                               fixed);
     }
 
     m_outTriangles.clear();
@@ -169,6 +211,12 @@ void TriangleMesh::syncOutput() {
     for (int i = 0; i < pImpl->out.numberofedges; ++i) {
         m_outEdges.emplace_back(pImpl->out.edgelist[i * 2], pImpl->out.edgelist[i * 2 + 1], 
                               pImpl->out.edgemarkerlist ? pImpl->out.edgemarkerlist[i] : 0);
+    }
+
+    m_outSegments.clear();
+    for (int i = 0; i < pImpl->out.numberofsegments; ++i) {
+        m_outSegments.emplace_back(pImpl->out.segmentlist[i * 2], pImpl->out.segmentlist[i * 2 + 1], 
+                                 pImpl->out.segmentmarkerlist ? pImpl->out.segmentmarkerlist[i] : 0);
     }
 
     m_outVoronoi.clear();
@@ -228,40 +276,44 @@ void TriangleMesh::syncOutput() {
     }
 }
 
-void TriangleMesh::smooth(int iterations) {
-    if (m_outPoints.empty()) return;
+void MeshOptimizer::smooth(std::vector<Point2D>& points, const std::vector<Triangle>& triangles, int iterations, FixedPredicate isFixed) {
+    if (points.empty()) return;
+    auto fixed = isFixed ? isFixed : [](const Point2D& p) { return p.isFixed || p.marker != 0; };
+    
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<double> nx(m_outPoints.size(), 0), ny(m_outPoints.size(), 0);
-        std::vector<int> count(m_outPoints.size(), 0);
-        for (const auto& t : m_outTriangles) {
+        std::vector<double> nx(points.size(), 0), ny(points.size(), 0);
+        std::vector<int> count(points.size(), 0);
+        for (const auto& t : triangles) {
             for (int j = 0; j < 3; ++j) {
                 int s = t.p[j], n1 = t.p[(j+1)%3], n2 = t.p[(j+2)%3];
-                nx[s] += m_outPoints[n1].x + m_outPoints[n2].x;
-                ny[s] += m_outPoints[n1].y + m_outPoints[n2].y;
+                nx[s] += points[n1].x + points[n2].x;
+                ny[s] += points[n1].y + points[n2].y;
                 count[s] += 2;
             }
         }
-        for (size_t i = 0; i < m_outPoints.size(); ++i) {
-            if (m_outPoints[i].marker == 0 && count[i] > 0) {
-                m_outPoints[i].x = nx[i] / count[i];
-                m_outPoints[i].y = ny[i] / count[i];
+        for (size_t i = 0; i < points.size(); ++i) {
+            if (!fixed(points[i]) && count[i] > 0) {
+                points[i].x = nx[i] / count[i];
+                points[i].y = ny[i] / count[i];
             }
         }
     }
 }
 
-void TriangleMesh::relaxVoronoi(int iterations) {
-    if (m_outPoints.empty() || m_outTriangles.empty()) return;
+void MeshOptimizer::relaxVoronoi(std::vector<Point2D>& points, const std::vector<Triangle>& triangles, int iterations, FixedPredicate isFixed) {
+    if (points.empty() || triangles.empty()) return;
+    auto fixed = isFixed ? isFixed : [](const Point2D& p) { return p.isFixed || p.marker != 0; };
+
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<std::vector<int>> v2t(m_outPoints.size());
-        for (size_t i = 0; i < m_outTriangles.size(); ++i) {
-            for (int j=0; j<3; ++j) v2t[m_outTriangles[i].p[j]].push_back(i);
+        std::vector<std::vector<int>> v2t(points.size());
+        for (size_t i = 0; i < triangles.size(); ++i) {
+            for (int j=0; j<3; ++j) v2t[triangles[i].p[j]].push_back(i);
         }
         std::vector<Point2D> circumcenters;
-        for (const auto& t : m_outTriangles) {
-            double ax = m_outPoints[t.p[0]].x, ay = m_outPoints[t.p[0]].y;
-            double bx = m_outPoints[t.p[1]].x, by = m_outPoints[t.p[1]].y;
-            double cx = m_outPoints[t.p[2]].x, cy = m_outPoints[t.p[2]].y;
+        for (const auto& t : triangles) {
+            double ax = points[t.p[0]].x, ay = points[t.p[0]].y;
+            double bx = points[t.p[1]].x, by = points[t.p[1]].y;
+            double cx = points[t.p[2]].x, cy = points[t.p[2]].y;
             double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
             if (std::abs(d) < 1e-9) circumcenters.emplace_back((ax+bx+cx)/3, (ay+by+cy)/3);
             else {
@@ -269,10 +321,10 @@ void TriangleMesh::relaxVoronoi(int iterations) {
                 circumcenters.emplace_back((a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d, (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d);
             }
         }
-        for (size_t i = 0; i < m_outPoints.size(); ++i) {
-            if (m_outPoints[i].marker != 0 || v2t[i].empty()) continue;
+        for (size_t i = 0; i < points.size(); ++i) {
+            if (fixed(points[i]) || v2t[i].empty()) continue;
             std::vector<std::pair<double, int>> sorted;
-            for (int tid : v2t[i]) sorted.push_back({std::atan2(circumcenters[tid].y - m_outPoints[i].y, circumcenters[tid].x - m_outPoints[i].x), tid});
+            for (int tid : v2t[i]) sorted.push_back({std::atan2(circumcenters[tid].y - points[i].y, circumcenters[tid].x - points[i].x), tid});
             std::sort(sorted.begin(), sorted.end());
             double area = 0, cx = 0, cy = 0;
             for (size_t j = 0; j < sorted.size(); ++j) {
@@ -281,24 +333,26 @@ void TriangleMesh::relaxVoronoi(int iterations) {
                 double cross = (p1.x * p2.y - p2.x * p1.y);
                 area += cross; cx += (p1.x + p2.x) * cross; cy += (p1.y + p2.y) * cross;
             }
-            if (std::abs(area) > 1e-9) { m_outPoints[i].x = cx / (3.0 * area); m_outPoints[i].y = cy / (3.0 * area); }
+            if (std::abs(area) > 1e-9) { points[i].x = cx / (3.0 * area); points[i].y = cy / (3.0 * area); }
         }
     }
 }
 
-void TriangleMesh::relaxODT(int iterations) {
-    if (m_outPoints.empty() || m_outTriangles.empty()) return;
+void MeshOptimizer::relaxODT(std::vector<Point2D>& points, const std::vector<Triangle>& triangles, int iterations, FixedPredicate isFixed) {
+    if (points.empty() || triangles.empty()) return;
+    auto fixed = isFixed ? isFixed : [](const Point2D& p) { return p.isFixed || p.marker != 0; };
+
     for (int iter = 0; iter < iterations; ++iter) {
-        std::vector<std::vector<int>> v2t(m_outPoints.size());
-        for (size_t i = 0; i < m_outTriangles.size(); ++i) {
-            for (int j=0; j<3; ++j) v2t[m_outTriangles[i].p[j]].push_back(i);
+        std::vector<std::vector<int>> v2t(points.size());
+        for (size_t i = 0; i < triangles.size(); ++i) {
+            for (int j=0; j<3; ++j) v2t[triangles[i].p[j]].push_back(i);
         }
         std::vector<Point2D> cc;
         std::vector<double> areas;
-        for (const auto& t : m_outTriangles) {
-            double ax = m_outPoints[t.p[0]].x, ay = m_outPoints[t.p[0]].y;
-            double bx = m_outPoints[t.p[1]].x, by = m_outPoints[t.p[1]].y;
-            double cx = m_outPoints[t.p[2]].x, cy = m_outPoints[t.p[2]].y;
+        for (const auto& t : triangles) {
+            double ax = points[t.p[0]].x, ay = points[t.p[0]].y;
+            double bx = points[t.p[1]].x, by = points[t.p[1]].y;
+            double cx = points[t.p[2]].x, cy = points[t.p[2]].y;
             areas.push_back(0.5 * std::abs(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by)));
             double d = 2.0 * (ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
             if (std::abs(d) < 1e-9) cc.emplace_back((ax+bx+cx)/3, (ay+by+cy)/3);
@@ -307,14 +361,15 @@ void TriangleMesh::relaxODT(int iterations) {
                 cc.emplace_back((a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d, (a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d);
             }
         }
-        for (size_t i = 0; i < m_outPoints.size(); ++i) {
-            if (m_outPoints[i].marker != 0 || v2t[i].empty()) continue;
+        for (size_t i = 0; i < points.size(); ++i) {
+            if (fixed(points[i]) || v2t[i].empty()) continue;
             double sa = 0, scx = 0, scy = 0;
             for (int tid : v2t[i]) { double a = areas[tid]; scx += cc[tid].x * a; scy += cc[tid].y * a; sa += a; }
-            if (sa > 1e-9) { m_outPoints[i].x = scx / sa; m_outPoints[i].y = scy / sa; }
+            if (sa > 1e-9) { points[i].x = scx / sa; points[i].y = scy / sa; }
         }
     }
 }
+
 
 void TriangleMesh::generateCVT(int numPoints, int iterations) {
     if (m_inPoints.empty()) addBoundingBox(0, 0, 1, 1);
@@ -325,18 +380,71 @@ void TriangleMesh::generateCVT(int numPoints, int iterations) {
     for (int i = 0; i < numPoints; ++i) addPoint(dx(rng), dy(rng), 0);
     Options opts; opts.quiet = true; opts.quality = false;
     for (int i = 0; i < iterations; ++i) {
-        triangulate(opts); relaxVoronoi(1);
+        triangulate(opts); MeshOptimizer::relaxVoronoi(m_outPoints, m_outTriangles, 1);
         std::vector<Point2D> next;
-        for (const auto& p : m_inPoints) if (p.marker != 0) next.push_back(p);
-        for (const auto& p : m_outPoints) if (p.marker == 0) next.push_back(p);
+        for (const auto& p : m_inPoints) if (p.isFixed || p.marker != 0) next.push_back(p);
+        for (const auto& p : m_outPoints) if (!p.isFixed && p.marker == 0) next.push_back(p);
         m_inPoints = next;
     }
     opts.quality = true; triangulate(opts);
 }
 
+
 void TriangleMesh::clear() {
     m_inPoints.clear(); m_inSegments.clear(); m_inHoles.clear();
-    m_outPoints.clear(); m_outTriangles.clear(); m_outEdges.clear(); m_outVoronoi.clear(); m_outVoroFaces.clear();
+    m_outPoints.clear(); m_outTriangles.clear(); m_outEdges.clear(); m_outSegments.clear(); m_outVoronoi.clear(); m_outVoroFaces.clear();
+}
+
+void TriangleMesh::resolveIntersections() {
+    if (m_inSegments.empty()) return;
+
+    bool foundIntersection = true;
+    while (foundIntersection) {
+        foundIntersection = false;
+        for (size_t i = 0; i < m_inSegments.size(); ++i) {
+            for (size_t j = i + 1; j < m_inSegments.size(); ++j) {
+                // Get points for segment i
+                const auto& s1 = m_inSegments[i];
+                const auto& s2 = m_inSegments[j];
+                
+                Point2D a = m_inPoints[s1.p[0]];
+                Point2D b = m_inPoints[s1.p[1]];
+                Point2D c = m_inPoints[s2.p[0]];
+                Point2D d = m_inPoints[s2.p[1]];
+
+                // Line-line intersection formula
+                double det = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+                if (std::abs(det) < 1e-10) continue; // Parallel or nearly parallel
+
+                double t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / det;
+                double u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / det;
+
+                // Check if intersection is strictly inside both segments
+                const double eps = 1e-7;
+                if (t > eps && t < 1.0 - eps && u > eps && u < 1.0 - eps) {
+                    Point2D intersect(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), s1.marker);
+                    
+                    int newIdx = (int)m_inPoints.size();
+                    m_inPoints.push_back(intersect);
+
+                    Edge e1 = m_inSegments[i];
+                    Edge e2 = m_inSegments[j];
+
+                    // Split segment i into (p0, new) and (new, p1)
+                    m_inSegments[i].p[1] = newIdx;
+                    m_inSegments.emplace_back(newIdx, e1.p[1], e1.marker);
+
+                    // Split segment j into (p0, new) and (new, p1)
+                    m_inSegments[j].p[1] = newIdx;
+                    m_inSegments.emplace_back(newIdx, e2.p[1], e2.marker);
+
+                    foundIntersection = true;
+                    break; // Restart search as indices might have changed or new intersections created
+                }
+            }
+            if (foundIntersection) break;
+        }
+    }
 }
 
 } // namespace triangle

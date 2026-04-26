@@ -1,0 +1,11 @@
+build/
+src/build/
+bin/
+*.o
+*.a
+.DS_Store
+imgui.ini
+_deps/
+interactive_mesh
+triangle
+benchmark_*

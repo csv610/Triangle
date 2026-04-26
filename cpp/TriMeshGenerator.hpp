@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <functional>
 
 namespace triangle {
 
@@ -11,7 +12,9 @@ namespace triangle {
 struct Point2D {
     double x, y;
     int marker;
-    Point2D(double _x = 0, double _y = 0, int _m = 0) : x(_x), y(_y), marker(_m) {}
+    bool isFixed;
+    Point2D(double _x = 0, double _y = 0, int _m = 0, bool _f = false) 
+        : x(_x), y(_y), marker(_m), isFixed(_f) {}
 };
 
 struct Triangle {
@@ -55,8 +58,8 @@ public:
     ~TriangleMesh();
 
     // --- Input API (Modern Types) ---
-    void addPoint(double x, double y, int marker = 0);
-    void addPoint(const Point2D& p) { addPoint(p.x, p.y, p.marker); }
+    void addPoint(double x, double y, int marker = 0, bool isFixed = false);
+    void addPoint(const Point2D& p) { addPoint(p.x, p.y, p.marker, p.isFixed); }
     void addSegment(int p1, int p2, int marker = 0);
     void addHole(double x, double y);
     
@@ -65,26 +68,36 @@ public:
     void addBoundingBox(double x1, double y1, double x2, double y2, int marker = 1);
     void addCircle(double cx, double cy, double radius, int segments, int marker = 0);
 
+    // --- Refinement ---
+    void refineSegments(double maxLength);
+
     // --- Execution ---
     bool triangulate(const Options& opts = Options());
 
-    // --- Optimization ---
-    void smooth(int iterations = 1);
-    void relaxVoronoi(int iterations = 1);
-    void relaxODT(int iterations = 1);
+    // --- High-Level Algorithms ---
     void generateCVT(int numPoints, int iterations = 20);
 
     // --- Bulk Output API (The "Clean" Way) ---
     const std::vector<Point2D>&  points()    const { return m_outPoints; }
     const std::vector<Triangle>& triangles() const { return m_outTriangles; }
     const std::vector<Edge>&     edges()     const { return m_outEdges; }
+    const std::vector<Edge>&     segments()  const { return m_outSegments; }
     const std::vector<Edge>&     voronoi()   const { return m_outVoronoi; }
     const std::vector<VoroFace>& voroFaces() const { return m_outVoroFaces; }
 
     void clear();
 
+    // Query Input State
+    int numInputPoints()   const { return (int)m_inPoints.size(); }
+    int numInputSegments() const { return (int)m_inSegments.size(); }
+    const std::vector<Point2D>& inputPoints()   const { return m_inPoints; }
+    const std::vector<Edge>&    inputSegments() const { return m_inSegments; }
+
+    // Grant access to internal state for editor
+    std::vector<Point2D>&  mutablePoints()      { return m_outPoints; }
+    std::vector<Point2D>&  mutableInputPoints() { return m_inPoints; }
+
 private:
-    // Implementation details hidden via opaque pointers or private members
     struct Impl;
     Impl* pImpl;
 
@@ -97,10 +110,36 @@ private:
     std::vector<Point2D>  m_outPoints;
     std::vector<Triangle> m_outTriangles;
     std::vector<Edge>     m_outEdges;
+    std::vector<Edge>     m_outSegments;
     std::vector<Edge>     m_outVoronoi;
     std::vector<VoroFace> m_outVoroFaces;
 
     void syncOutput();
+    void resolveIntersections();
+};
+
+/**
+ * @brief Specialized class for mesh optimization and smoothing.
+ */
+class MeshOptimizer {
+public:
+    /// Returns true if the point should remain fixed (not moved).
+    using FixedPredicate = std::function<bool(const Point2D&)>;
+
+    static void smooth(std::vector<Point2D>& points, 
+                      const std::vector<Triangle>& triangles, 
+                      int iterations = 1,
+                      FixedPredicate isFixed = nullptr);
+
+    static void relaxVoronoi(std::vector<Point2D>& points, 
+                            const std::vector<Triangle>& triangles, 
+                            int iterations = 1,
+                            FixedPredicate isFixed = nullptr);
+
+    static void relaxODT(std::vector<Point2D>& points, 
+                        const std::vector<Triangle>& triangles, 
+                        int iterations = 1,
+                        FixedPredicate isFixed = nullptr);
 };
 
 } // namespace triangle

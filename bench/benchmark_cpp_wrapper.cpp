@@ -1,10 +1,12 @@
-#include "Triangle.hpp"
+#include "TriMeshGenerator.hpp"
 #include <iostream>
 #include <chrono>
 #include <vector>
 
+using namespace triangle;
+
 int main() {
-    triangle::TriangleMesh mesh;
+    TriangleMesh mesh;
     mesh.addBoundingBox(0, 0, 100, 100);
 
     const int numPoints = 10000;
@@ -21,14 +23,14 @@ int main() {
 
     // 2. Lloyd Relaxation Benchmark
     start = std::chrono::high_resolution_clock::now();
-    mesh.relaxVoronoi(iterations);
+    MeshOptimizer::relaxVoronoi(mesh.mutablePoints(), mesh.triangles(), iterations);
     end = std::chrono::high_resolution_clock::now();
     diff = end - start;
     std::cout << "relaxVoronoi (10 steps): " << diff.count() << " seconds" << std::endl;
 
     // 3. ODT Relaxation Benchmark
     start = std::chrono::high_resolution_clock::now();
-    mesh.relaxODT(iterations);
+    MeshOptimizer::relaxODT(mesh.mutablePoints(), mesh.triangles(), iterations);
     end = std::chrono::high_resolution_clock::now();
     diff = end - start;
     std::cout << "relaxODT (10 steps): " << diff.count() << " seconds" << std::endl;
