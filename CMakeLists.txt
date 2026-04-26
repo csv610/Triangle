@@ -4,6 +4,7 @@ project(TriangleMesh VERSION 1.6.0 LANGUAGES C CXX)
 # --- Options ---
 option(BUILD_GUI "Build the interactive ImGui tool" ON)
 option(BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(BUILD_TESTS "Build unit tests" ON)
 
 # --- Global Configuration ---
 set(CMAKE_CXX_STANDARD 11)
@@ -20,6 +21,8 @@ set(TRIANGLE_DEFS
 # --- Dependencies ---
 find_package(Threads REQUIRED)
 
+include(FetchContent)
+
 if(BUILD_GUI)
     find_package(glfw3 3.3 QUIET)
     if(NOT glfw3_FOUND)
@@ -32,7 +35,6 @@ if(BUILD_GUI)
     
     find_package(OpenGL REQUIRED)
     
-    include(FetchContent)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -41,7 +43,17 @@ if(BUILD_GUI)
     FetchContent_MakeAvailable(imgui)
 endif()
 
+if(BUILD_TESTS)
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.4.0
+    )
+    FetchContent_MakeAvailable(Catch2)
+endif()
+
 # --- Core Library ---
+# ... (rest of core library)
 # This library is used by the GUI, benchmarks, and other C++ applications.
 add_library(mesh_core STATIC
     src/triangle.c
@@ -111,6 +123,18 @@ if(BUILD_BENCHMARKS)
         add_executable(benchmark_cpp_wrapper bench/benchmark_cpp_wrapper.cpp)
         target_link_libraries(benchmark_cpp_wrapper PRIVATE mesh_core)
     endif()
+endif()
+
+# --- Unit Tests ---
+if(BUILD_TESTS)
+    enable_testing()
+    
+    # Catch2 Tests
+    add_executable(unit_tests tests/test_mesh.cpp)
+    target_link_libraries(unit_tests PRIVATE mesh_core Catch2::Catch2WithMain)
+    
+    include(Catch)
+    catch_discover_tests(unit_tests)
 endif()
 
 # --- Installation (Optional) ---

@@ -193,6 +193,9 @@ bool TriangleMesh::triangulate(const Options& opts) {
 
 void TriangleMesh::syncOutput() {
     m_outPoints.clear();
+    if (pImpl->out.pointlist == NULL && pImpl->out.numberofpoints > 0) {
+        return;
+    }
     for (int i = 0; i < pImpl->out.numberofpoints; ++i) {
         bool fixed = (i < (int)m_inPoints.size()) ? m_inPoints[i].isFixed : false;
         m_outPoints.emplace_back(pImpl->out.pointlist[i * 2], pImpl->out.pointlist[i * 2 + 1], 
@@ -201,26 +204,32 @@ void TriangleMesh::syncOutput() {
     }
 
     m_outTriangles.clear();
-    for (int i = 0; i < pImpl->out.numberoftriangles; ++i) {
-        m_outTriangles.emplace_back(pImpl->out.trianglelist[i * 3], 
-                                  pImpl->out.trianglelist[i * 3 + 1], 
-                                  pImpl->out.trianglelist[i * 3 + 2]);
+    if (pImpl->out.trianglelist != NULL) {
+        for (int i = 0; i < pImpl->out.numberoftriangles; ++i) {
+            m_outTriangles.emplace_back(pImpl->out.trianglelist[i * 3], 
+                                      pImpl->out.trianglelist[i * 3 + 1], 
+                                      pImpl->out.trianglelist[i * 3 + 2]);
+        }
     }
 
     m_outEdges.clear();
-    for (int i = 0; i < pImpl->out.numberofedges; ++i) {
-        m_outEdges.emplace_back(pImpl->out.edgelist[i * 2], pImpl->out.edgelist[i * 2 + 1], 
-                              pImpl->out.edgemarkerlist ? pImpl->out.edgemarkerlist[i] : 0);
+    if (pImpl->out.edgelist != NULL) {
+        for (int i = 0; i < pImpl->out.numberofedges; ++i) {
+            m_outEdges.emplace_back(pImpl->out.edgelist[i * 2], pImpl->out.edgelist[i * 2 + 1], 
+                                  pImpl->out.edgemarkerlist ? pImpl->out.edgemarkerlist[i] : 0);
+        }
     }
 
     m_outSegments.clear();
-    for (int i = 0; i < pImpl->out.numberofsegments; ++i) {
-        m_outSegments.emplace_back(pImpl->out.segmentlist[i * 2], pImpl->out.segmentlist[i * 2 + 1], 
-                                 pImpl->out.segmentmarkerlist ? pImpl->out.segmentmarkerlist[i] : 0);
+    if (pImpl->out.segmentlist != NULL) {
+        for (int i = 0; i < pImpl->out.numberofsegments; ++i) {
+            m_outSegments.emplace_back(pImpl->out.segmentlist[i * 2], pImpl->out.segmentlist[i * 2 + 1], 
+                                     pImpl->out.segmentmarkerlist ? pImpl->out.segmentmarkerlist[i] : 0);
+        }
     }
 
     m_outVoronoi.clear();
-    if (pImpl->vorout.edgelist) {
+    if (pImpl->vorout.edgelist != NULL) {
         for (int i = 0; i < pImpl->vorout.numberofedges; ++i) {
             m_outVoronoi.emplace_back(pImpl->vorout.edgelist[i * 2], pImpl->vorout.edgelist[i * 2 + 1]);
         }
