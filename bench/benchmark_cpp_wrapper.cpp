@@ -1,4 +1,5 @@
 #include "TriMeshGenerator.hpp"
+#include "MeshOptimizer.hpp"
 #include <iostream>
 #include <chrono>
 #include <vector>

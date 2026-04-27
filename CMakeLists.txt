@@ -55,6 +55,8 @@ add_library(mesh_core STATIC
     src/triangle.h
     cpp/TriMeshGenerator.cpp
     cpp/TriMeshGenerator.hpp
+    cpp/MeshOptimizer.cpp
+    cpp/MeshOptimizer.hpp
 )
 
 target_compile_definitions(mesh_core PRIVATE ${TRIANGLE_DEFS} TRILIBRARY)

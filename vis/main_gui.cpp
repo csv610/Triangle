@@ -3,6 +3,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl2.h"
 #include "TriMeshGenerator.hpp"
+#include "MeshOptimizer.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>
